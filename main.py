@@ -3,11 +3,6 @@ import yt_dlp
 import requests
 import os
 import tempfile
-import json
-import fcntl
-
-PENDING_FILE = os.path.join(os.path.dirname(__file__), 'pending_urls.json')
-PENDING_LOCK = PENDING_FILE + '.lock'
 
 app = Flask(__name__)
 
@@ -68,11 +63,9 @@ def download_video():
                 "formats": formats_list
             })
     except yt_dlp.utils.DownloadError as e:
-        real_error = str(e)
-        return jsonify({"status": "error", "message": f"فشل الاستخراج: {real_error}"})
+        return jsonify({"status": "error", "message": f"فشل الاستخراج: {str(e)}"})
     except Exception as e:
-        real_error = str(e)
-        return jsonify({"status": "error", "message": f"خطأ غير متوقع: {real_error}"})
+        return jsonify({"status": "error", "message": f"خطأ غير متوقع: {str(e)}"})
 
 
 @app.route('/api/telegram', methods=['POST'])
@@ -85,9 +78,10 @@ def send_to_telegram():
     bot_token = data.get('bot_token')
     chat_id = data.get('chat_id')
     cookies = data.get('cookies')
+    original_url = data.get('original_url', '')
 
     if not video_url or not bot_token or not chat_id:
-        return jsonify({"status": "error", "message": "بيانات ناقصة (رابط، توكن، أو معرف المحادثة)"})
+        return jsonify({"status": "error", "message": "بيانات ناقصة"})
 
     tmp_dir = None
     try:
@@ -117,7 +111,13 @@ def send_to_telegram():
             return jsonify({"status": "error", "message": f"حجم الملف يتجاوز الحد المسموح (50 MB)"})
 
         telegram_url = f"https://api.telegram.org/bot{bot_token}/sendVideo"
-        tg_data = {'chat_id': chat_id, 'supports_streaming': 'true'}
+        tg_data = {
+            'chat_id': chat_id, 
+            'supports_streaming': 'true'
+        }
+        
+        if original_url:
+            tg_data['caption'] = original_url
         
         with open(video_path, 'rb') as video_file:
             response = requests.post(telegram_url, data=tg_data, files={'video': video_file}, timeout=120)
