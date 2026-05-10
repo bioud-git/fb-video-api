@@ -21,10 +21,15 @@ def download_video():
     if not url:
         return jsonify({"status": "error", "message": "الرجاء إرسال الرابط"})
 
+    cookies = request.headers.get('Cookie')
+
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
     }
+    
+    if cookies:
+        ydl_opts['http_headers'] = {'Cookie': cookies}
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -63,9 +68,11 @@ def download_video():
                 "formats": formats_list
             })
     except yt_dlp.utils.DownloadError as e:
-        return jsonify({"status": "error", "message": f"فشل الاستخراج: {str(e)}"})
+        real_error = str(e)
+        return jsonify({"status": "error", "message": f"فشل الاستخراج: {real_error}"})
     except Exception as e:
-        return jsonify({"status": "error", "message": f"خطأ غير متوقع: {str(e)}"})
+        real_error = str(e)
+        return jsonify({"status": "error", "message": f"خطأ غير متوقع: {real_error}"})
 
 
 @app.route('/api/telegram', methods=['POST'])
@@ -77,7 +84,8 @@ def send_to_telegram():
     video_url = data.get('url')
     bot_token = data.get('bot_token')
     chat_id = data.get('chat_id')
-    
+    cookies = data.get('cookies')
+
     if not video_url or not bot_token or not chat_id:
         return jsonify({"status": "error", "message": "بيانات ناقصة (رابط، توكن، أو معرف المحادثة)"})
 
@@ -92,6 +100,8 @@ def send_to_telegram():
             'quiet': True,
             'no_warnings': True,
         }
+        if cookies:
+            ydl_opts['http_headers'] = {'Cookie': cookies}
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([video_url])
