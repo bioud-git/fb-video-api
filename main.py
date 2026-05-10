@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "الخادم يعمل بنجاح ويدعم الجودات المتعددة!"
+    return "الخادم يعمل بنجاح ويدعم مقاطع الفيديو والصور!"
 
 @app.route('/api/download', methods=['GET'])
 def download_video():
@@ -38,41 +38,45 @@ def download_video():
                     vcodec = f.get('vcodec', 'none')
                     height = f.get('height')
 
-                    if ext == 'mp4' and vcodec != 'none' and height:
-                        res_str = f"{height}p"
-                        if res_str not in seen_resolutions:
-                            seen_resolutions.add(res_str)
+                    is_video = ext in ['mp4', 'webm'] and vcodec != 'none' and height
+                    is_image = ext in ['jpg', 'jpeg', 'png', 'webp']
+
+                    if is_video or is_image:
+                        res_str = f"{height}p" if height else "صورة"
+                        unique_key = f"{res_str}_{ext}"
+                        if unique_key not in seen_resolutions:
+                            seen_resolutions.add(unique_key)
                             formats_list.append({
                                 "resolution": res_str,
                                 "url": f.get('url'),
-                                "height": height
+                                "height": height or 0,
+                                "ext": ext
                             })
 
                 formats_list = sorted(formats_list, key=lambda k: k['height'], reverse=True)
 
             if not formats_list:
+                ext = info.get('ext', 'mp4')
                 formats_list.append({
-                    "resolution": "جودة افتراضية",
+                    "resolution": "جودة أصلية",
                     "url": info.get('url', ''),
-                    "height": 0
+                    "height": 0,
+                    "ext": ext
                 })
 
             return jsonify({
                 "status": "success",
-                "title": info.get('title', 'Video'),
+                "title": info.get('title', 'Media'),
                 "formats": formats_list
             })
-    except yt_dlp.utils.DownloadError as e:
-        return jsonify({"status": "error", "message": f"فشل الاستخراج: {str(e)}"})
     except Exception as e:
-        return jsonify({"status": "error", "message": f"خطأ غير متوقع: {str(e)}"})
-
+        return jsonify({"status": "error", "message": f"خطأ: {str(e)}"})
 
 @app.route('/api/telegram', methods=['POST'])
 def send_to_telegram():
     data = request.get_json()
     if not data:
-        return jsonify({"status": "error", "message": "الرجاء إرسال البيانات بصيغة JSON"})
+        return jsonify({"status": "error", "message": "بيانات مفقودة"})
 
     video_url = data.get('url')
     bot_token = data.get('bot_token')
@@ -89,7 +93,7 @@ def send_to_telegram():
         outtmpl = os.path.join(tmp_dir, '%(id)s.%(ext)s')
 
         ydl_opts = {
-            'format': 'best[ext=mp4]/best',
+            'format': 'best',
             'outtmpl': outtmpl,
             'quiet': True,
             'no_warnings': True,
@@ -102,25 +106,29 @@ def send_to_telegram():
 
         downloaded_files = os.listdir(tmp_dir)
         if not downloaded_files:
-            return jsonify({"status": "error", "message": "فشل تحميل الفيديو"})
+            return jsonify({"status": "error", "message": "فشل التحميل"})
 
-        video_path = os.path.join(tmp_dir, downloaded_files[0])
-        file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+        file_path = os.path.join(tmp_dir, downloaded_files[0])
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        ext = os.path.splitext(file_path)[1].lower()
 
         if file_size_mb > 50:
-            return jsonify({"status": "error", "message": f"حجم الملف يتجاوز الحد المسموح (50 MB)"})
+            return jsonify({"status": "error", "message": "الملف كبير جداً"})
 
-        telegram_url = f"https://api.telegram.org/bot{bot_token}/sendVideo"
-        tg_data = {
-            'chat_id': chat_id, 
-            'supports_streaming': 'true'
-        }
-        
+        tg_data = {'chat_id': chat_id}
         if original_url:
             tg_data['caption'] = original_url
+
+        if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+            telegram_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+            file_key = 'photo'
+        else:
+            telegram_url = f"https://api.telegram.org/bot{bot_token}/sendVideo"
+            file_key = 'video'
+            tg_data['supports_streaming'] = 'true'
         
-        with open(video_path, 'rb') as video_file:
-            response = requests.post(telegram_url, data=tg_data, files={'video': video_file}, timeout=120)
+        with open(file_path, 'rb') as media_file:
+            response = requests.post(telegram_url, data=tg_data, files={file_key: media_file}, timeout=120)
 
         if response.status_code == 200 and response.json().get('ok'):
             return jsonify({"status": "success", "message": "تم الإرسال بنجاح"})
