@@ -29,6 +29,11 @@ def download_video():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            # معالجة الصور المتعددة (Carousel) في إنستغرام
+            if 'entries' in info and info['entries']:
+                info = info['entries'][0]
+
             formats_list = []
             seen_resolutions = set()
 
@@ -71,6 +76,7 @@ def download_video():
             })
     except Exception as e:
         return jsonify({"status": "error", "message": f"خطأ: {str(e)}"})
+
 
 @app.route('/api/telegram', methods=['POST'])
 def send_to_telegram():
